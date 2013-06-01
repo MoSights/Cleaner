@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-16"?>
+<Root>
+	<Exclude>
+		<Folder>temp</Folder>
+		<File></File>
+	</Exclude>
+	<Include>
+		<Folder>debug</Folder>
+		<Folder>release</Folder>
+		<Folder>ipch</Folder>
+		<Folder>bin</Folder>
+		<File>.obj</File>
+		<File>.lib</File>
+		<File>.exp</File>
+		<File>.exe</File>
+		<File>.pdb</File>
+		<File>.user</File>
+		<File>.aps</File>
+		<File>.pch</File>
+		<File>.vspscc</File>
+		<File>.opensdf</File>
+		<File>.ncb</File>
+		<File>.sdf</File>
+		<File>.suo</File>
+		<File>.tlb</File>
+		<File>.tlh</File>
+		<File>.bak</File>
+		<File>.cache</File>
+		<File>.ilk</File>
+		<!--File>.log</File-->
+		<!--File>*_i.c</File-->
+		<!--File>*_p.c</File-->
+	</Include>
+</Root>
