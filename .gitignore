@@ -11,3 +11,16 @@
 *.lai
 *.la
 *.a
+[Bb]in
+[Ll]og*/
+[Dd]ebug*/
+[Rr]elease*/
+*.obj
+*.exe
+*.pdb
+*.user
+*.aps
+*.pch
+*.vspscc
+*.ncb
+*.suo

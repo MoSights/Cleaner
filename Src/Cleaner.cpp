@@ -28,6 +28,7 @@ wchar_t ARGS_SHORT_PATH[] = L"-p";
 wchar_t ARGS_PATH[] = L"--path";
 wchar_t ARGS_SHORT_HELP[] = L"-h";
 wchar_t ARGS_HELP[] = L"--help";
+wchar_t CONFIG_XML[] = L"Clean.xml";
 
 typedef struct _tagCLEAN_INFO
 {
@@ -397,7 +398,7 @@ int wmain(int _Argc, wchar_t ** _Argv)
 	lpszName = PathFindFileName(g_szExecPath);
 	PathRemoveFileSpecW(g_szExecPath);
 	if(PathIsRootW(g_szExecPath))
-		PathRemoveBackslashW(g_szExecPath);
+		g_szExecPath[wcslen(g_szExecPath-1)] = L'\0';
 	if(lpszName)
 		w2a(lpszName, szLogName);
 	w2a(g_szExecPath, szLogPath);
@@ -419,11 +420,21 @@ int wmain(int _Argc, wchar_t ** _Argv)
 	}
 
 	LOGI("Loading Cleaner's Config.");
+	wchar_t szConfigPath[1024] = {0};
+	wcscpy(szConfigPath, g_szExecPath);
+	PathAppendW(szConfigPath, CONFIG_XML);
 	std::wstring strConfig = g_OptOptions.asString(ARGS_SHORT_CONFIG).c_str();
 	if(!strConfig.empty())
+	{
 		LoadConfig(strConfig.c_str());
+	}
 	else
-		LoadConfig(NULL);
+	{
+		if(PathFileExists(szConfigPath))
+			LoadConfig(szConfigPath);
+		else
+			LoadConfig(NULL);
+	}
 	LOGI("Load Cleaner's Config End.");
 
 	LOGI("Clean File Start.");
@@ -437,6 +448,7 @@ int wmain(int _Argc, wchar_t ** _Argv)
 	LOGI("Clean File End.");
 
 	LOGI("Cleaner Quit.");
+	getchar();
 	return 0;
 }
 
