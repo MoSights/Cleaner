@@ -2,6 +2,8 @@
 #pragma warning(push)
 #pragma warning(disable:4996) // 消除_tcscat、_tcscpy、_tcsicmp等_tcs*函数的警告
 
+#define MEMORY_BREAK_POINT -1
+
 #include <Windows.h>
 #include <Shlwapi.h>
 #pragma comment(lib, "shlwapi.lib")
@@ -22,37 +24,47 @@ using namespace slim;
 
 #include "resource.h"
 
-wchar_t ARGS_SHORT_CONFIG[] = L"-c";
-wchar_t ARGS_CONFIG[] = L"--config";
-wchar_t ARGS_SHORT_PATH[] = L"-p";
-wchar_t ARGS_PATH[] = L"--path";
-wchar_t ARGS_SHORT_HELP[] = L"-h";
-wchar_t ARGS_HELP[] = L"--help";
+wchar_t ARGS_CONFIG[] = L"-c";
+wchar_t ARGS_LONG_CONFIG[] = L"--config";
+wchar_t ARGS_PATH[] = L"-p";
+wchar_t ARGS_LONG_PATH[] = L"--path";
+wchar_t ARGS_HELP[] = L"-h";
+wchar_t ARGS_LONG_HELP[] = L"--help";
+wchar_t ARGS_MODE[] = L"-m";
+wchar_t ARGS_LONG_MODE[] = L"--mode";
 wchar_t CONFIG_XML[] = L"Clean.xml";
 
-typedef struct _tagCLEAN_INFO
+typedef struct _tagSCAN_INFO
 {
 	wchar_t szPattern[1024];
 	BOOL bExclude;
 	BOOL bFolder;
-} CLEAN_INFO, *PCLEAN_INFO, *LPCLEAN_INFO;
+} SCAN_INFO, *PSCAN_INFO, *LPSCAN_INFO;
 
-enum CLEAN_TYPE
+enum SCAN_TYPE
 {
-	CLEAN_DELETE = 0, // 清理文件
-	CLEAN_IGNORE = 1, // 忽略该文件，若为文件夹，则需要递归清理该文件夹
-	CLEAN_EXCLUDE = 2 // 不做处理，若为文件夹，则跳过该文件夹，不做处理
+	SCAN_DELETE = 0,	// 清理文件
+	SCAN_IGNORE = 1,	// 忽略该文件，若为文件夹，则需要递归清理该文件夹
+	SCAN_EXCLUDE = 2	// 不做处理，若为文件夹，则跳过该文件夹，不做处理
+};
+
+enum EXECUTE_MODE
+{
+	EXECUTE_PRINT = 0,		// 扫描文件模式（只扫显示结果）
+	EXECUTE_CLEAN,			// 删除文件模式
 };
 
 Options	g_OptOptions;
 Parser	g_OptParser;
-list<LPCLEAN_INFO> g_lstCleanInfo;
+list<LPSCAN_INFO> g_lstScanInfo;
 wchar_t g_szExecPath[1024] = {0};
+int g_cleanMode = EXECUTE_CLEAN;
+int g_cleanLogId = 0;
 
 // 添加清理匹配节点
-BOOL AddCleanItem(LPCWSTR lpszPattern, BOOL bFolder, BOOL bExclude = FALSE);
+BOOL AddScanItem(LPCWSTR lpszPattern, BOOL bFolder, BOOL bExclude = FALSE);
 // 匹配文件、文件夹是否需要清理
-LONG IsNeedToClean(LPCWSTR lpszFile, BOOL bFolder = FALSE);
+LONG IsMatch(LPCWSTR lpszFile, BOOL bFolder = FALSE);
 
 // 解析启动参数
 int OptParse(int nArgc, wchar_t* lpszArgv[]);
@@ -61,14 +73,16 @@ int Usage(LPCWSTR lpszAppName);
 // 加载配置信息
 BOOL LoadConfig(LPCWSTR lpszPath);
 // 清理文件
-BOOL CleanFile(LPCWSTR lpszPath, BOOL bClearAll = FALSE);
+BOOL ScanFile(LPCWSTR lpszPath, BOOL bClearAll = FALSE);
+// 释放资源
+void CleanMemory();
 
 //////////////////////////////////////////////////////////////////////////
 // Functions Implement
 //////////////////////////////////////////////////////////////////////////
 
 /*************************************************************************
- * Method:    		AddCleanItem
+ * Method:    		AddScanItem
  * Description:		添加清理匹配节点
  * ParameterList:	LPCWSTR lpszPattern, BOOL bFolder, BOOL bExclude
  * Parameter:       lpszPattern：匹配内容
@@ -79,21 +93,20 @@ BOOL CleanFile(LPCWSTR lpszPath, BOOL bClearAll = FALSE);
  * Author:			MoSights
  * CopyRight:		
  ************************************************************************/
-BOOL AddCleanItem(LPCWSTR lpszPattern, BOOL bFolder, BOOL bExclude/* = FALSE*/)
+BOOL AddScanItem(LPCWSTR lpszPattern, BOOL bFolder, BOOL bExclude/* = FALSE*/)
 {
-	BOOL bRet = FALSE;
-	LPCLEAN_INFO lpInfo = new CLEAN_INFO();
+	LPSCAN_INFO lpInfo = new SCAN_INFO();
 	if(!lpInfo)
-		return bRet;
+		return FALSE;
 	wcscpy(lpInfo->szPattern, lpszPattern);
 	lpInfo->bFolder = bFolder;
 	lpInfo->bExclude = bExclude;
-	g_lstCleanInfo.push_back(lpInfo);
+	g_lstScanInfo.push_back(lpInfo);
 	return TRUE;
 }
 
 /*************************************************************************
- * Method:    		IsNeedToClean
+ * Method:    		IsMatch
  * Description:		匹配文件、文件夹是否需要清理
  * ParameterList:	LPCWSTR lpszFile, BOOL bFolder
  * Parameter:       lpszFile：检测是否需要清理的文件路径
@@ -103,30 +116,30 @@ BOOL AddCleanItem(LPCWSTR lpszPattern, BOOL bFolder, BOOL bExclude/* = FALSE*/)
  * Author:			MoSights
  * CopyRight:		
  ************************************************************************/
-LONG IsNeedToClean(LPCWSTR lpszFile, BOOL bFolder/* = FALSE*/)
+LONG IsMatch(LPCWSTR lpszFile, BOOL bFolder/* = FALSE*/)
 {
-	LPCLEAN_INFO lpInfo = NULL;
-	list<LPCLEAN_INFO>::iterator iter;
+	LPSCAN_INFO lpInfo = NULL;
+	list<LPSCAN_INFO>::iterator iter;
 	LPWSTR lpszName = NULL;
 	if(bFolder)
 		lpszName = PathFindFileName(lpszFile);
 	else
 		lpszName = PathFindExtension(lpszFile);
-	for(iter=g_lstCleanInfo.begin(); iter!=g_lstCleanInfo.end(); iter++)
+	for(iter=g_lstScanInfo.begin(); iter!=g_lstScanInfo.end(); iter++)
 	{
 		lpInfo = (*iter);
 		if(!lpInfo)
-			return CLEAN_IGNORE;
+			return SCAN_IGNORE;
 		if(wcsicmp(lpszName, lpInfo->szPattern)==0 && bFolder == lpInfo->bFolder)
 		{
 			if(lpInfo->bExclude)
-				return CLEAN_EXCLUDE;
+				return SCAN_EXCLUDE;
 			else
-				return CLEAN_DELETE;
+				return SCAN_DELETE;
 		}
 	}
 
-	return CLEAN_IGNORE;
+	return SCAN_IGNORE;
 }
 
 /*************************************************************************
@@ -143,13 +156,16 @@ LONG IsNeedToClean(LPCWSTR lpszFile, BOOL bFolder/* = FALSE*/)
 int OptParse(int nArgc, wchar_t* lpszArgv[])
 {
 	int nRetCode = E_OK;
-	nRetCode = g_OptOptions.addOption(ARGS_SHORT_CONFIG, ARGS_CONFIG, L"Config's File", OPT_NONE | OPT_NEEDARG, NULL);
+	nRetCode = g_OptOptions.addOption(ARGS_CONFIG, ARGS_LONG_CONFIG, L"Config's File", OPT_NONE | OPT_NEEDARG, NULL);
 	if(nRetCode!=E_OK)
 		return nRetCode;
-	nRetCode = g_OptOptions.addOption(ARGS_SHORT_PATH, ARGS_PATH, L"Clean's Path", OPT_NONE | OPT_NEEDARG, NULL);
+	nRetCode = g_OptOptions.addOption(ARGS_PATH, ARGS_LONG_PATH, L"Clean's Path", OPT_NONE | OPT_NEEDARG, NULL);
 	if(nRetCode!=E_OK)
 		return nRetCode;
-	nRetCode = g_OptOptions.addOption(ARGS_SHORT_HELP, ARGS_HELP, L"Show Help", OPT_NONE, NULL);
+	nRetCode = g_OptOptions.addOption(ARGS_MODE, ARGS_LONG_MODE, L"Clean Mode", OPT_NONE | OPT_NEEDARG, NULL);
+	if(nRetCode!=E_OK)
+		return nRetCode;
+	nRetCode = g_OptOptions.addOption(ARGS_HELP, ARGS_LONG_HELP, L"Show Help", OPT_NONE, NULL);
 	if(nRetCode!=E_OK)
 		return nRetCode;
 
@@ -175,6 +191,8 @@ int Usage(LPCWSTR lpszAppName)
 	wprintf(L"usage: %s [-c] <file> [-p] <directory>\n", lpszAppName);
 	wprintf(L"       -c     Load config from file.\n");
 	wprintf(L"       -p     Specify the cleaning directory, if not the cleaning directory is %s's file path.\n\n", lpszAppName);
+	wprintf(L"		 -m		Clean Mode: c for clean, t for testing, m for match");
+	wprintf(L"		 -h		Show help.");
 	return -1;
 }
 
@@ -211,9 +229,9 @@ BOOL LoadConfig(LPCWSTR lpszPath)
 		HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, nSize);
 		LPBYTE pMemData = (LPBYTE)GlobalLock(hMem);
 		memcpy(pMemData, lpResData, nSize);
-		GlobalUnlock(hMem);
-
 		doc.loadFromMemory((char *)lpResData, nSize);
+		GlobalUnlock(hMem);
+		GlobalFree(hMem);
 	}
 	XmlNode* pRoot = doc.findChild(L"Root");
 	if(!pRoot)
@@ -235,7 +253,7 @@ BOOL LoadConfig(LPCWSTR lpszPath)
 		while(pFolder)
 		{
 			lpszPattern = pFolder->getString();
-			AddCleanItem(lpszPattern, bFolder, bExclude);
+			AddScanItem(lpszPattern, bFolder, bExclude);
 
 			pFolder = pExclude->findNextChild(L"Folder", iter);
 		}
@@ -247,7 +265,7 @@ BOOL LoadConfig(LPCWSTR lpszPath)
 		while(pFile)
 		{
 			lpszPattern = pFile->getString();
-			AddCleanItem(lpszPattern, bFolder, bExclude);
+			AddScanItem(lpszPattern, bFolder, bExclude);
 
 			pFile = pExclude->findNextChild(L"File", iter);
 		}
@@ -265,7 +283,7 @@ BOOL LoadConfig(LPCWSTR lpszPath)
 		while(pFolder)
 		{
 			lpszPattern = pFolder->getString();
-			AddCleanItem(lpszPattern, bFolder, bExclude);
+			AddScanItem(lpszPattern, bFolder, bExclude);
 
 			pFolder = pInclude->findNextChild(L"Folder", iter);
 		}
@@ -277,7 +295,7 @@ BOOL LoadConfig(LPCWSTR lpszPath)
 		while(pFile)
 		{
 			lpszPattern = pFile->getString();
-			AddCleanItem(lpszPattern, bFolder, bExclude);
+			AddScanItem(lpszPattern, bFolder, bExclude);
 
 			pFile = pInclude->findNextChild(L"File", iter);
 		}
@@ -287,7 +305,7 @@ BOOL LoadConfig(LPCWSTR lpszPath)
 }
 
 /*************************************************************************
- * Method:    		CleanFile
+ * Method:    		ScanFile
  * Description:		清理文件
  * ParameterList:	LPCWSTR lpszPath, BOOL bClearAll
  * Parameter:       lpszPath：待清理的文件路径
@@ -297,7 +315,7 @@ BOOL LoadConfig(LPCWSTR lpszPath)
  * Author:			MoSights
  * CopyRight:		
  ************************************************************************/
-BOOL CleanFile(LPCWSTR lpszPath, BOOL bClearAll/* = FALSE*/)
+BOOL ScanFile(LPCWSTR lpszPath, BOOL bClearAll/* = FALSE*/)
 {
 	BOOL bRet = FALSE;
 	wchar_t szFolder[1024] = {0};
@@ -308,7 +326,7 @@ BOOL CleanFile(LPCWSTR lpszPath, BOOL bClearAll/* = FALSE*/)
 	if(INVALID_HANDLE_VALUE == hFind)
 		return bRet;
 	BOOL bFolder = FALSE;
-	LONG lCleanType = CLEAN_IGNORE;
+	LONG lScanType = SCAN_IGNORE;
 	wchar_t szCurPath[1024];
 	char szCurPath_a[1024], szLogMsg_a[2048];
 	while(TRUE)
@@ -320,7 +338,7 @@ BOOL CleanFile(LPCWSTR lpszPath, BOOL bClearAll/* = FALSE*/)
 		w2a(szCurPath, szCurPath_a);
 		if(FindFileData.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) // 忽略硬连接文件
 		{
-			lCleanType = CLEAN_IGNORE;
+			lScanType = SCAN_IGNORE;
 			bFolder = FALSE;
 		}
 		else if(FindFileData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
@@ -333,19 +351,21 @@ BOOL CleanFile(LPCWSTR lpszPath, BOOL bClearAll/* = FALSE*/)
 			}
 			if(bClearAll)
 			{
-				bRet = CleanFile(szCurPath, TRUE);
-				bRet = RemoveDirectory(szCurPath);
+				bRet = ScanFile(szCurPath, TRUE);
+				if(g_cleanMode == EXECUTE_CLEAN)
+					bRet = RemoveDirectoryW(szCurPath);
 			}
 			else
 			{
-				lCleanType = IsNeedToClean(szCurPath, TRUE);
-				if(lCleanType==CLEAN_DELETE)
-					bRet = CleanFile(szCurPath, TRUE);
-				else if(lCleanType==CLEAN_IGNORE)
-					bRet = CleanFile(szCurPath, FALSE);
-				if(lCleanType==CLEAN_DELETE)
+				lScanType = IsMatch(szCurPath, TRUE);
+				if(lScanType==SCAN_DELETE)
+					bRet = ScanFile(szCurPath, TRUE);
+				else if(lScanType==SCAN_IGNORE)
+					bRet = ScanFile(szCurPath, FALSE);
+				if(lScanType==SCAN_DELETE)
 				{
-					RemoveDirectoryW(szCurPath);
+					if(g_cleanMode == EXECUTE_CLEAN)
+						RemoveDirectoryW(szCurPath);
 					sprintf(szLogMsg_a, "CleanFile - RemoveDirectory - %s.", szCurPath_a);
 					LOGE(szLogMsg_a);
 				}
@@ -354,23 +374,25 @@ BOOL CleanFile(LPCWSTR lpszPath, BOOL bClearAll/* = FALSE*/)
 		}
 		else
 		{
-			lCleanType = CLEAN_DELETE;
+			lScanType = SCAN_DELETE;
 			bFolder = FALSE;
 		}
-		if(lCleanType==CLEAN_DELETE && !bFolder)
+		if(lScanType==SCAN_DELETE && !bFolder)
 		{	
 			if(bClearAll)
 			{
-				bRet = DeleteFileW(szCurPath);
+				if(g_cleanMode == EXECUTE_CLEAN)
+					bRet = DeleteFileW(szCurPath);
 				sprintf(szLogMsg_a, "CleanFile - DeleteFile - %s.", szCurPath_a);
 				LOGI(szLogMsg_a);
 			}
 			else
 			{
-				lCleanType = IsNeedToClean(szCurPath);
-				if(lCleanType==CLEAN_DELETE)
+				lScanType = IsMatch(szCurPath);
+				if(lScanType==SCAN_DELETE)
 				{
-					bRet = DeleteFileW(szCurPath);
+					if(g_cleanMode == EXECUTE_CLEAN)
+						bRet = DeleteFileW(szCurPath);
 					sprintf(szLogMsg_a, "CleanFile - DeleteFile - %s.", szCurPath_a);
 					LOGI(szLogMsg_a);
 				}
@@ -388,8 +410,39 @@ BOOL CleanFile(LPCWSTR lpszPath, BOOL bClearAll/* = FALSE*/)
 	return bRet;
 }
 
+/*************************************************************************
+ * Method:    		CleanMemory
+ * Description:		释放资源
+ * ParameterList:	
+ * Return Value:	
+ * Date:        	13:06:01 10:46:41
+ * Author:			MoSights
+ * CopyRight:		
+ ************************************************************************/
+void CleanMemory()
+{
+	LPSCAN_INFO lpInfo = NULL;
+	list<LPSCAN_INFO>::iterator iter;
+	for(iter=g_lstScanInfo.begin(); iter!=g_lstScanInfo.end();)
+	{
+		lpInfo = (*iter);
+		iter++;
+		if(lpInfo)
+		{
+			delete lpInfo;
+		}
+	}
+	g_lstScanInfo.clear();
+}
+
 int wmain(int _Argc, wchar_t ** _Argv)
 {
+	// 内存跟踪调试
+#ifdef _DEBUG
+	_CrtSetDbgFlag(_CRTDBG_ALLOC_MEM_DF | _CRTDBG_LEAK_CHECK_DF);
+	_CrtSetBreakAlloc(MEMORY_BREAK_POINT);
+#endif
+
 	// 默认配置：打开日志功能
 	bool bConsole = true;
 	char szLogName[1024] = {0}, szLogPath[1024] = {0};
@@ -413,17 +466,28 @@ int wmain(int _Argc, wchar_t ** _Argv)
 	OptParse(_Argc, _Argv);
 	LOGI("Parse Startup Parameters End.");
 
-	if(g_OptOptions.isSet(ARGS_SHORT_HELP))
+	if(g_OptOptions.isSet(ARGS_HELP))
 	{
 		Usage(lpszName);
 		return 0;
+	}
+
+	if(wcsicmp(g_OptOptions.asString(ARGS_MODE).c_str(), L"t")==0)
+	{
+		g_cleanMode = EXECUTE_PRINT;
+		g_cleanLogId = ILog4zManager::GetInstance()->CreateLogger("Clean", szLogPath, LOG_LEVEL_DEBUG, false);
+		LOG_INFO(g_cleanLogId, "This is Printing.");
+	}
+	else if(wcsicmp(g_OptOptions.asString(ARGS_MODE).c_str(), L"c")==0)
+	{
+		g_cleanMode = EXECUTE_CLEAN;
 	}
 
 	LOGI("Loading Cleaner's Config.");
 	wchar_t szConfigPath[1024] = {0};
 	wcscpy(szConfigPath, g_szExecPath);
 	PathAppendW(szConfigPath, CONFIG_XML);
-	std::wstring strConfig = g_OptOptions.asString(ARGS_SHORT_CONFIG).c_str();
+	std::wstring strConfig = g_OptOptions.asString(ARGS_CONFIG).c_str();
 	if(!strConfig.empty())
 	{
 		LoadConfig(strConfig.c_str());
@@ -439,13 +503,15 @@ int wmain(int _Argc, wchar_t ** _Argv)
 
 	LOGI("Clean File Start.");
 	wchar_t szCleanPath[1024] = {0};
-	std::wstring strPath = g_OptOptions.asString(ARGS_SHORT_PATH).c_str();
+	std::wstring strPath = g_OptOptions.asString(ARGS_PATH).c_str();
 	if(!strPath.empty())
 		wcscpy(szCleanPath, strPath.c_str());
 	else
 		wcscpy(szCleanPath, g_szExecPath);
-	CleanFile(szCleanPath);
+	ScanFile(szCleanPath);
 	LOGI("Clean File End.");
+
+	CleanMemory();
 
 	LOGI("Cleaner Quit.");
 	getchar();

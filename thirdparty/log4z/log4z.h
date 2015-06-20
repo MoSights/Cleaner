@@ -221,10 +221,7 @@ extern __thread char g_log4zstreambuf[LOG4Z_LOG_BUF_SIZE];
 //! base micro.
 #define LOG_STREAM(id, level, log)\
 {\
-	zsummer::log4z::CStringStream ss(g_log4zstreambuf, LOG4Z_LOG_BUF_SIZE);\
-	ss << log;\
-	ss << " ( " << __FILE__ << " ) : "  << __LINE__;\
-	zsummer::log4z::ILog4zManager::GetInstance()->PushLog(id, level, g_log4zstreambuf);\
+	zsummer::log4z::ILog4zManager::GetInstance()->PushLog(id, level, log);\
 }
 
 //! fast micro

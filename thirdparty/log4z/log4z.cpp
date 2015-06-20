@@ -481,6 +481,7 @@ public:
 	CLogerManager()
 	{
 		m_bRuning = false;
+		m_bLineNumber = false;
 		m_lastId = LOG4Z_MAIN_LOGGER_ID;
 		GetProcessInfo(m_loggers[LOG4Z_MAIN_LOGGER_ID]._name, m_loggers[LOG4Z_MAIN_LOGGER_ID]._pid);
 		m_ids["Main"] = LOG4Z_MAIN_LOGGER_ID;
@@ -646,19 +647,32 @@ public:
 			return true;
 		}
 
+		const char *pData = NULL;
+		if(m_bLineNumber)
+		{
+			zsummer::log4z::CStringStream ss(g_log4zstreambuf, LOG4Z_LOG_BUF_SIZE);
+			ss << log;
+			ss << " ( " << __FILE__ << " ) : "  << __LINE__;
+			pData = g_log4zstreambuf;
+		}
+		else
+		{
+			pData = log;
+		}
+
 		LogData * pLog = new LogData;
 		pLog->_id =id;
 		pLog->_level = level;
 		pLog->_time = time(NULL);
-		int len = (int) strlen(log);
+		int len = (int) strlen(pData);
 		if (len >= LOG4Z_LOG_BUF_SIZE)
 		{
-			memcpy(pLog->_content, log, LOG4Z_LOG_BUF_SIZE);
+			memcpy(pLog->_content, pData, LOG4Z_LOG_BUF_SIZE);
 			pLog->_content[LOG4Z_LOG_BUF_SIZE-1] = '\0';
 		}
 		else
 		{
-			memcpy(pLog->_content, log, len+1);
+			memcpy(pLog->_content, pData, len+1);
 		}
 		CAutoLock l(m_lock);
 		m_logs.push_back(pLog);
@@ -869,6 +883,8 @@ private:
 
 	//! thread status.
 	bool		m_bRuning;
+	//! show line number.
+	bool		m_bLineNumber;
 	//! wait thread started.
 	CSem		m_semaphore;
 
